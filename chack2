@@ -1,0 +1,324 @@
+[2:38 pm, 11/06/2026] sazzad: #include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+#include <SoftwareSerial.h>
+
+// --- PIN DEFINITIONS (Matching Your Diagram) ---
+int trigFront = 2;
+int echoFront = 3;
+int trigRear = 9;
+int echoRear = 10;
+int vibSensor = 11;
+
+int warningPin = 4; // Red LED and Buzzer
+int safePin = 12;   // Green LED
+
+// GSM Pins
+int gsmTx = 8; // Connects to GSM TX
+int gsmRx = 7; // Connects to GSM RX (via the voltage divider!)
+SoftwareSerial myGSM(gsmTx, gsmRx); 
+
+// LCD Setup (Address 0x27, 16 columns, 2 rows)
+LiquidCrystal_I2C lcd(0x27, 16, 2); 
+
+// --- VOID SETUP: Runs Once ---
+void setup() {
+  // 1. Setup the Sensor Pins
+  pinMode(trigFront, OUTPUT);
+  pinMode(echoFront, INPUT);
+  pinMode(trigRear, OUTPUT);
+  pinMode(echoRear, INPUT);
+  pinMode(vibSensor, INPUT);
+  
+  // 2. Setup Output Pins
+  pinMode(warningPin, OUTPUT);
+  pinMode(safePin, OUTPUT);
+
+  // 3. Start the LCD Screen
+  lcd.init();
+  lcd.backlight();
+  lcd.setCursor(0, 0);
+  lcd.print("System Starting");
+  
+  // 4. Start GSM Communication
+  myGSM.begin(9600);
+  
+  // Give modules a few seconds to warm up
+  delay(3000); 
+  lcd.clear();
+}
+
+// --- VOID LOOP: Runs Forever ---
+void loop() {
+  // STEP 1: Read the sensors
+  long frontDistance = checkDistance(trigFront, echoFront);
+  long rearDistance = checkDistance(trigRear, echoRear);
+  int vibration = digitalRead(vibSensor); 
+
+  // STEP 2: Update the LCD Screen
+  lcd.setCursor(0, 0);
+  lcd.print("F:"); lcd.print(frontDistance); lcd.print("cm ");
+  lcd.setCursor(8, 0);
+  lcd.print("R:"); lcd.print(rearDistance); lcd.print("cm ");
+
+  // STEP 3: Decide what to do based on the sensors
+  
+  // Condition A: If something is very close AND we feel a vibration (Crash!)
+  if ((frontDistance < 30 || rearDistance < 30) && vibration == HIGH) {
+    lcd.setCursor(0, 1);
+    lcd.print("CRASH DETECTED! ");
+    
+    // Turn on Red LED and Buzzer, turn off Green LED
+    digitalWrite(warningPin, HIGH);
+    digitalWrite(safePin, LOW);
+    
+    // Send the Emergency SMS
+    sendEmergencySMS();
+    
+    // Stop the code here so it doesn't send 100 text messages
+    while(true) { 
+      delay(1000); 
+    } 
+  }
+  
+  // Condition B: If something is getting close, but no crash
+  else if (frontDistance < 100 || rearDistance < 100) {
+    lcd.setCursor(0, 1);
+    lcd.print("Status: WARNING ");
+    digitalWrite(warningPin, HIGH); // Buzzer/Red ON
+    digitalWrite(safePin, LOW);     // Green OFF
+  }
+  
+  // Condition C: Everything is safe
+  else {
+    lcd.setCursor(0, 1);
+    lcd.print("Status: SAFE    ");
+    digitalWrite(warningPin, LOW);  // Buzzer/Red OFF
+    digitalWrite(safePin, HIGH);    // Green ON
+  }
+
+  // Wait half a second before checking again
+  delay(500); 
+}
+
+// --- CUSTOM FUNCTIONS ---
+
+// Function to calculate distance from Ultrasonic Sensors
+long checkDistance(int trig, int echo) {
+  digitalWrite(trig, LOW);
+  delayMicroseconds(2);
+  digitalWrite(trig, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trig, LOW);
+  
+  long duration = pulseIn(echo, HIGH);
+  long cm = duration * 0.034 / 2;
+  return cm;
+}
+
+// Function to send the SMS
+void sendEmergencySMS() {
+  lcd.clear();
+  lcd.print("Sending SMS...");
+  
+  myGSM.println("AT+CMGF=1"); // Set GSM to text mode
+  delay(1000);
+  
+  // REPLACE THE NUMBER BELOW WITH YOUR OWN PHONE NUMBER
+  myGSM.println("AT+CMGS=\"+8801XXXXXXXXX\""); 
+  delay(1000);
+  
+  myGSM.print("EMERGENCY: Vehicle Crash Detected!"); // The message text
+  delay(100);
+  
+  myGSM.write(26); // This special character sends the message
+  delay(3000);
+  
+  lcd.clear();
+  lcd.print("SMS Sent!");
+}
+[3:12 pm, 11/06/2026] sazzad: #include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+#include <SoftwareSerial.h>
+#include <TinyGPS++.h>
+
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+
+TinyGPSPlus gps;
+
+// GPS
+SoftwareSerial gpsSerial(8, 7); // RX,TX
+
+// GSM
+SoftwareSerial gsmSerial(6, 5); // RX,TX
+
+// HC-SR04 Front
+#define FRONT_TRIG 2
+#define FRONT_ECHO 3
+
+// HC-SR04 Rear
+#define REAR_TRIG 9
+#define REAR_ECHO 10
+
+// Sensors
+#define VIBRATION_PIN 11
+
+// Outputs
+#define BUZZER 4
+#define RED_LED 12
+#define GREEN_LED 13
+
+String phoneNumber = "+8801XXXXXXXXX";
+
+long getDistance(int trigPin, int echoPin)
+{
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(2);
+
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+
+  long duration = pulseIn(echoPin, HIGH);
+  long distance = duration * 0.034 / 2;
+
+  return distance;
+}
+
+void sendSMS(String msg)
+{
+  gsmSerial.println("AT");
+  delay(1000);
+
+  gsmSerial.println("AT+CMGF=1");
+  delay(1000);
+
+  gsmSerial.print("AT+CMGS=\"");
+  gsmSerial.print(phoneNumber);
+  gsmSerial.println("\"");
+  delay(1000);
+
+  gsmSerial.print(msg);
+  delay(500);
+
+  gsmSerial.write(26);
+  delay(5000);
+}
+
+void sendLocationSMS()
+{
+  String sms = "ACCIDENT DETECTED!\n";
+
+  if (gps.location.isValid())
+  {
+    sms += "Latitude: ";
+    sms += String(gps.location.lat(), 6);
+
+    sms += "\nLongitude: ";
+    sms += String(gps.location.lng(), 6);
+
+    sms += "\nGoogle Map:\nhttps://maps.google.com/?q=";
+    sms += String(gps.location.lat(), 6);
+    sms += ",";
+    sms += String(gps.location.lng(), 6);
+  }
+  else
+  {
+    sms += "GPS Location Not Available";
+  }
+
+  sendSMS(sms);
+}
+
+void setup()
+{
+  pinMode(FRONT_TRIG, OUTPUT);
+  pinMode(FRONT_ECHO, INPUT);
+
+  pinMode(REAR_TRIG, OUTPUT);
+  pinMode(REAR_ECHO, INPUT);
+
+  pinMode(VIBRATION_PIN, INPUT);
+
+  pinMode(BUZZER, OUTPUT);
+  pinMode(RED_LED, OUTPUT);
+  pinMode(GREEN_LED, OUTPUT);
+
+  Serial.begin(9600);
+  gpsSerial.begin(9600);
+  gsmSerial.begin(9600);
+
+  lcd.init();
+  lcd.backlight();
+
+  lcd.setCursor(0, 0);
+  lcd.print("SYSTEM READY");
+
+  digitalWrite(GREEN_LED, HIGH);
+}
+
+void loop()
+{
+  while (gpsSerial.available())
+  {
+    gps.encode(gpsSerial.read());
+  }
+
+  long frontDist = getDistance(FRONT_TRIG, FRONT_ECHO);
+  long rearDist = getDistance(REAR_TRIG, REAR_ECHO);
+
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("F:");
+  lcd.print(frontDist);
+  lcd.print("cm");
+
+  lcd.setCursor(9, 0);
+  lcd.print("R:");
+  lcd.print(rearDist);
+  lcd.print("cm");
+
+  bool warning = false;
+
+  if (frontDist > 0 && frontDist < 20)
+    warning = true;
+
+  if (rearDist > 0 && rearDist < 20)
+    warning = true;
+
+  if (warning)
+  {
+    digitalWrite(BUZZER, HIGH);
+    digitalWrite(RED_LED, HIGH);
+    digitalWrite(GREEN_LED, LOW);
+
+    lcd.setCursor(0, 1);
+    lcd.print("WARNING !");
+  }
+  else
+  {
+    digitalWrite(BUZZER, LOW);
+    digitalWrite(RED_LED, LOW);
+    digitalWrite(GREEN_LED, HIGH);
+
+    lcd.setCursor(0, 1);
+    lcd.print("SAFE");
+  }
+
+  int vibration = digitalRead(VIBRATION_PIN);
+
+  if (vibration == HIGH)
+  {
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("ACCIDENT!");
+
+    digitalWrite(BUZZER, HIGH);
+    digitalWrite(RED_LED, HIGH);
+
+    sendLocationSMS();
+
+    delay(15000);
+  }
+
+  delay(500);
+}
